@@ -437,12 +437,11 @@ struct modeset_output *modeset_output_create(int fd, drmModeRes *res, drmModeCon
 		goto out_blob;
 	}
 
-	ret = modeset_find_plane(fd, out, &out->video_plane, DRM_FORMAT_NV12);
-	if (ret) {
-		fprintf(stderr, "no valid video plane with format NV12 for crtc %u\n", out->crtc.id);
-		goto out_blob;
-	}
-	fprintf(stdout, "Using plane %d (NV12) for Video\n",  out->video_plane.id);
+	ret = modeset_setup_video_plane(fd, out);
+if (ret) {
+    fprintf(stderr, "failed to setup video plane for crtc %u\n", out->crtc.id);
+    goto out_blob;
+}
 
 	ret = modeset_find_plane(fd, out, &out->osd_plane, DRM_FORMAT_ARGB8888);
 	if (ret) {
