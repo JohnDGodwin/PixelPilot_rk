@@ -11,11 +11,16 @@
 
 using json = nlohmann::json;
 
+// Configuration constants
+static const char* SERVER_IP = "127.0.0.1";
+static const int SERVER_PORT = 8103;
+static const int SOCKET_TIMEOUT_SEC = 1;
+static const int RECONNECT_DELAY_MS = 10;  // Delay before retrying connection
+static const int READ_DELAY_MS = 1;        // Delay between reads when connected
+
 int json_stats_thread_signal = 0;
 
 void *__JSON_STATS_THREAD__(void *param) {
-    const char* SERVER_IP = "127.0.0.1";
-    const int SERVER_PORT = 8103;
     char buffer[4096];
     std::string accumulated_data;
     
@@ -26,13 +31,13 @@ void *__JSON_STATS_THREAD__(void *param) {
         int sock = socket(AF_INET, SOCK_STREAM, 0);
         if (sock < 0) {
             spdlog::error("Socket creation error");
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::this_thread::sleep_for(std::chrono::milliseconds(RECONNECT_DELAY_MS));
             continue;
         }
 
         // Set socket timeout
         struct timeval tv;
-        tv.tv_sec = 1;
+        tv.tv_sec = SOCKET_TIMEOUT_SEC;
         tv.tv_usec = 0;
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
         setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
@@ -47,7 +52,7 @@ void *__JSON_STATS_THREAD__(void *param) {
         if (connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
             spdlog::debug("Connection attempt failed, will retry");
             close(sock);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(RECONNECT_DELAY_MS));
             continue;
         }
 
@@ -72,37 +77,31 @@ void *__JSON_STATS_THREAD__(void *param) {
                 try {
                     auto obj = json::parse(line);
                     if (obj["type"] == "rx" && obj.contains("rx_ant_stats")) {
-                        // Create a batch for multiple facts
                         void* batch = osd_batch_init(obj["rx_ant_stats"].size());
                         
                         for (const auto& ant_stat : obj["rx_ant_stats"]) {
                             if (ant_stat.contains("rssi_avg")) {
-                                // Create tags for the antenna
                                 osd_tag tags[1];
                                 snprintf(tags[0].key, TAG_MAX_LEN, "ant");
                                 snprintf(tags[0].val, TAG_MAX_LEN, "%d", ant_stat["ant"].get<int>());
                                 
-                                // Add RSSI fact to batch
                                 osd_add_int_fact(batch, "radio.rssi_avg", tags, 1, 
                                                ant_stat["rssi_avg"].get<int>());
-
-                                spdlog::debug("Got RSSI avg {} for antenna {}", 
-                                            ant_stat["rssi_avg"].get<int>(),
-                                            ant_stat["ant"].get<int>());
                             }
                         }
-                        
-                        // Publish all facts at once
                         osd_publish_batch(batch);
                     }
                 } catch (const json::parse_error& e) {
                     spdlog::debug("Failed to parse JSON line: {}", e.what());
                 }
             }
+
+            // Very short sleep between reads to prevent CPU spinning
+            std::this_thread::sleep_for(std::chrono::milliseconds(READ_DELAY_MS));
         }
 
         close(sock);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(RECONNECT_DELAY_MS));
     }
 
     return nullptr;
