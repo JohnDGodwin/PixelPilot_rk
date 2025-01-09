@@ -213,48 +213,19 @@ const char* drm_fourcc_to_string(uint32_t fourcc) {
     return result;
 }
 
-int modeset_find_plane(int fd, struct modeset_output *out, struct drm_object *plane_out, uint32_t plane_format)
+
+int modeset_setup_video_plane(int fd, struct modeset_output *out)
 {
-	drmModePlaneResPtr plane_res;
-	bool found_plane = false;
-	int i, ret = -EINVAL;
+    int ret = 0;
+    // Set fixed video plane ID to 54
+    out->video_plane.id = 54;
+    
+    fprintf(stdout, "Using fixed plane ID %d (NV12) for Video\n", out->video_plane.id);
+    
+    modeset_get_object_properties(fd, &out->video_plane, DRM_MODE_OBJECT_PLANE);
 
-	plane_res = drmModeGetPlaneResources(fd);
-	if (!plane_res) {
-		fprintf(stderr, "drmModeGetPlaneResources failed: %s\n",
-				strerror(errno));
-		return -ENOENT;
-	}
-
-	for (i = 0; (i < plane_res->count_planes) && !found_plane; i++) {
-		int plane_id = plane_res->planes[i];
-
-		drmModePlanePtr plane = drmModeGetPlane(fd, plane_id);
-		if (!plane) {
-			fprintf(stderr, "drmModeGetPlane(%u) failed: %s\n", plane_id,
-					strerror(errno));
-			continue;
-		}
-
-		if (plane->possible_crtcs & (1 << out->crtc_index)) {
-			for (int j=0; j<plane->count_formats; j++) {
-				if (plane->formats[j] ==  plane_format) {
-					found_plane = true;
-				 	plane_out->id = plane_id;
-				 	ret = 0;
-					break;
-				}
-			}
-		}
-
-		drmModeFreePlane(plane);
-	}
-
-	drmModeFreePlaneResources(plane_res);
-
-	return ret;
+    return ret;
 }
-
 
 void modeset_drm_object_fini(struct drm_object *obj)
 {
